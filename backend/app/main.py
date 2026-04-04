@@ -3,7 +3,7 @@ from fastapi import FastAPI, UploadFile, File, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 
-from .routes import voice, audio
+from .routes import voice, audio, subtitle
 from .models.schemas import ScriptParseResponse
 from .services.parser import parse_script, extract_characters
 from . import state
@@ -73,6 +73,7 @@ async def parse_uploaded_script(file: UploadFile = File(...)):
 # 注册其他路由
 app.include_router(voice.router)
 app.include_router(audio.router)
+app.include_router(subtitle.router)
 
 
 @app.get("/")

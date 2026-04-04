@@ -34,6 +34,7 @@ export const subtitleApi = {
     max_length: number;
     max_preview_lines?: number;
     use_ai?: boolean;
+    ai_provider?: string;
   }): Promise<{ preview: string[]; total_subtitles: number }> => {
     const { data: result } = await api.post('/subtitle/preview', data);
     return result;
@@ -44,8 +45,30 @@ export const subtitleApi = {
     lines: Line[];
     max_length: number;
     use_ai?: boolean;
+    ai_provider?: string;
+    script_name?: string;
   }): Promise<{ filename: string; url: string; content: string }> => {
     const { data: result } = await api.post('/subtitle/generate', data);
+    return result;
+  },
+
+  // 生成拼音字幕
+  generatePinyin: async (data: {
+    content: string;
+    ai_provider: string;
+    base_name?: string;
+  }): Promise<{ filename: string; content: string }> => {
+    const { data: result } = await api.post('/subtitle/pinyin', data);
+    return result;
+  },
+
+  // 生成英文字幕
+  generateEnglish: async (data: {
+    content: string;
+    ai_provider: string;
+    base_name?: string;
+  }): Promise<{ filename: string; content: string }> => {
+    const { data: result } = await api.post('/subtitle/english', data);
     return result;
   },
 };

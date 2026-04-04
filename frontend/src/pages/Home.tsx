@@ -5,6 +5,7 @@ import { ScriptViewer } from '@/components/ScriptViewer';
 import { VoiceConfig } from '@/components/VoiceConfig';
 import { GenerationPanel } from '@/components/GenerationPanel';
 import { AudioPlayer } from '@/components/AudioPlayer';
+import { SubtitleGenerator } from '@/components/SubtitleGenerator';
 import { scriptApi, voiceApi, audioApi } from '@/services/api';
 import type { Line, Voice, TaskStatus, AudioFile } from '@/types';
 
@@ -282,6 +283,14 @@ export const Home: React.FC = () => {
             {/* 生成结果 */}
             {generatedFiles.length > 0 && (
               <section className="bg-white rounded-lg shadow p-6">
+                <div className="flex items-center justify-between mb-4">
+                  <h2 className="text-lg font-medium text-gray-900">生成的音频</h2>
+                  <SubtitleGenerator
+                    lines={lines}
+                    generatedFiles={generatedFiles}
+                    scriptName={selectedFile?.name.replace('.txt', '')}
+                  />
+                </div>
                 <AudioPlayer
                   files={generatedFiles}
                   lines={lines}

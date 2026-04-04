@@ -15,7 +15,7 @@ if [ -f "$SCRIPT_DIR/.backend.pid" ]; then
     echo "[OK] 后端服务已停止"
 else
     # 尝试查找并杀死Python进程
-    pkill -f "python.*run.py" 2>/dev/null
+    pkill -f "venv/bin/python.*run.py" 2>/dev/null
     echo "[OK] 后端服务已停止"
 fi
 echo ""

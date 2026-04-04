@@ -1,56 +1,57 @@
 @echo off
 chcp 65001 >nul
 echo ==========================================
-echo      播客TTS生成器 - 一键启动脚本
+echo      Podcast TTS Generator - Startup Script
 echo ==========================================
 echo.
 
-:: 检查Python
+:: Check Python
 python --version >nul 2>&1
 if errorlevel 1 (
-    echo [错误] 未找到Python，请确保Python已安装并添加到PATH
+    echo [Error] Python not found. Please install Python and add to PATH
     pause
     exit /b 1
 )
 
-:: 检查Node.js
+:: Check Node.js
 node --version >nul 2>&1
 if errorlevel 1 (
-    echo [错误] 未找到Node.js，请确保Node.js已安装并添加到PATH
+    echo [Error] Node.js not found. Please install Node.js and add to PATH
     pause
     exit /b 1
 )
 
-echo [1/3] 正在启动后端服务...
-echo     后端地址: http://localhost:8000
+echo [1/3] Starting backend service...
+echo     Backend: http://localhost:8000
 echo.
-start "后端服务" cmd /c "cd /d "%~dp0backend" && python run.py"
+start "Backend" cmd /c "cd /d "%~dp0backend" && "%~dp0venv\Scripts\python.exe" run.py"
 
-:: 等待后端启动
+:: Wait for backend
 timeout /t 3 /nobreak >nul
 
-echo [2/3] 正在启动前端服务...
-echo     前端地址: http://localhost:5173
+echo [2/3] Starting frontend service...
+echo     Frontend: http://localhost:5173
 echo.
-start "前端服务" cmd /c "cd /d "%~dp0frontend" && npm run dev"
+start "Frontend" cmd /c "cd /d "%~dp0frontend" && npm run dev"
 
-:: 等待前端启动
+:: Wait for frontend
 timeout /t 3 /nobreak >nul
 
-echo [3/3] 服务启动完成！
+echo [3/3] Services started!
 echo.
 echo ==========================================
-echo  后端API文档: http://localhost:8000/docs
-echo  前端页面:   http://localhost:5173
+echo  Backend API docs: http://localhost:8000/docs
+echo  Frontend:        http://localhost:5173
 echo ==========================================
 echo.
-echo 按任意键打开浏览器访问前端页面...
+echo Press any key to open browser...
 pause >nul
 
-:: 打开浏览器
+:: Open browser
 start http://localhost:5173
 
 echo.
-echo 提示: 关闭此窗口不会停止服务，请手动关闭后台的CMD窗口
+echo Note: Closing this window won't stop services.
+echo       Please manually close the background CMD windows.
 echo.
 pause

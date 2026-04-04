@@ -13,14 +13,19 @@
 - **实时进度**: 显示生成进度和状态
 - **在线播放**: 直接在浏览器中播放生成的音频
 - **单文件下载**: 支持单独下载每个音频文件
-- **AI智能字幕**: 调用 MiniMax AI 对台词进行智能断句，生成 SRT 字幕文件
+- **AI智能字幕**: 调用 DeepSeek/MiniMax AI 对台词进行智能断句，生成 SRT 字幕文件
+- **拼音字幕**: 基于中文字幕自动生成带声调符号的拼音字幕
+- **英文字幕**: 自动翻译中文字幕为英文，保持相同时间轴
+- **精准时间轴**: 使用 Whisper 进行词级时间戳对齐，确保字幕与音频同步
+- **无缝时间轴**: 自动消除相邻字幕之间的间隙
 
 ## 技术栈
 
 ### 后端
 - **FastAPI** - 高性能Python Web框架
 - **Azure Cognitive Services Speech SDK** - 语音合成
-- **MiniMax AI (LangChain)** - 智能断句
+- **DeepSeek/MiniMax AI (LangChain)** - 智能断句、拼音生成、英文翻译
+- **Whisper (faster-whisper)** - 词级时间戳对齐
 - **Uvicorn** - ASGI服务器
 
 ### 前端
@@ -91,13 +96,14 @@ cp .env .env.local
 AZURE_SPEECH_KEY=your_azure_key_here
 AZURE_SPEECH_REGION=eastus
 MINIMAX_API_KEY=your_minimax_key_here
+DEEPSEEK_API_KEY=your_deepseek_key_here
 ```
 
 ### 3. 启动后端
 
 ```bash
 # 安装依赖
-pip install fastapi uvicorn python-multipart pydantic azure-cognitiveservices-speech python-dotenv aiofiles
+pip install fastapi uvicorn python-multipart pydantic azure-cognitiveservices-speech python-dotenv aiofiles faster-whisper langchain langchain-openai
 
 # 启动服务
 python backend/run.py
@@ -131,7 +137,8 @@ npm run dev
 4. **调整语速**: 拖动滑块调整语速（0.3-1.0倍）
 5. **生成音频**: 点击"开始生成音频"按钮
 6. **播放/下载**: 生成完成后可直接播放或下载音频文件
-7. **生成字幕**: 点击"生成字幕"按钮，可先点击"AI 预览"查看断句效果，满意后点击"生成并下载"导出 SRT 文件
+7. **生成字幕**: 点击"生成字幕"按钮，选择 AI 引擎（DeepSeek/MiniMax），预览断句效果后生成中文字幕
+8. **生成拼音/英文字幕**: 生成中文字幕后，可继续生成拼音字幕（带声调符号）或英文字幕（时间轴保持一致）
 
 ## 剧本格式
 
@@ -167,6 +174,8 @@ Leo: 大家好，我是Leo。
 | `/api/audio/download/{filename}` | GET | 下载音频文件 |
 | `/api/subtitle/preview` | POST | AI预览字幕断句效果 |
 | `/api/subtitle/generate` | POST | 生成并下载SRT字幕文件 |
+| `/api/subtitle/pinyin` | POST | 将中文字幕转换为拼音字幕 |
+| `/api/subtitle/english` | POST | 将中文字幕翻译为英文字幕 |
 
 ## 项目结构
 
@@ -174,25 +183,36 @@ Leo: 大家好，我是Leo。
 podcast-tools/
 ├── backend/
 │   ├── app/
-│   │   ├── main.py          # FastAPI入口
-│   │   ├── models/          # 数据模型
-│   │   ├── routes/          # API路由
-│   │   └── services/        # 业务逻辑（含AI断句）
-│   ├── output/              # 生成音频/字幕输出
-│   ├── logs/                # 运行日志
-│   └── run.py               # 启动脚本
+│   │   ├── main.py              # FastAPI入口
+│   │   ├── models/              # 数据模型
+│   │   ├── routes/              # API路由
+│   │   └── services/            # 业务逻辑（AI断句、Whisper对齐、拼音/英文转换）
+│   ├── output/                  # 生成音频/字幕输出
+│   ├── logs/                    # 运行日志
+│   └── run.py                   # 启动脚本
 ├── frontend/
 │   ├── src/
-│   │   ├── components/      # React组件（含SubtitleGenerator）
-│   │   ├── pages/           # 页面
-│   │   ├── services/        # API服务
-│   │   └── types/           # TypeScript类型
+│   │   ├── components/          # React组件（含SubtitleGenerator）
+│   │   ├── pages/               # 页面
+│   │   ├── services/            # API服务
+│   │   └── types/               # TypeScript类型
 │   └── package.json
-├── start.bat / start.sh     # 一键启动
-├── stop.bat / stop.sh       # 一键停止
-├── restart.bat / restart.sh # 一键重启
+├── start.bat / start.sh         # 一键启动
+├── stop.bat / stop.sh           # 一键停止
+├── restart.bat / restart.sh     # 一键重启
 └── README.md
 ```
+
+## 字幕文件名规则
+
+字幕文件命名基于原始剧本文件名：
+
+- **中文字幕**: `{脚本名}{4位随机数}.srt`  
+  例如: `大白话中文5231.srt`
+- **拼音字幕**: `{脚本名}{4位随机数}py.srt`  
+  例如: `大白话中文5231py.srt`
+- **英文字幕**: `{脚本名}{4位随机数}en.srt`  
+  例如: `大白话中文5231en.srt`
 
 ## Azure语音服务
 
@@ -249,5 +269,8 @@ MIT License
 ## 致谢
 
 - [Azure Cognitive Services](https://azure.microsoft.com/services/cognitive-services/speech/)
+- [DeepSeek](https://deepseek.com/)
+- [MiniMax](https://www.minimaxi.com/)
+- [Whisper (OpenAI)](https://github.com/openai/whisper)
 - [FastAPI](https://fastapi.tiangolo.com/)
 - [React](https://react.dev/)

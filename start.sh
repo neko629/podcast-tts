@@ -26,7 +26,7 @@ echo ""
 
 # 启动后端服务
 cd "$SCRIPT_DIR/backend" || exit 1
-python3 run.py &
+"$SCRIPT_DIR/venv/bin/python" run.py &
 BACKEND_PID=$!
 echo $BACKEND_PID > "$SCRIPT_DIR/.backend.pid"
 
