@@ -1,5 +1,5 @@
 import axios from 'axios';
-import type { ScriptParseResponse, Voice, TaskStatus, AudioFile, GenerateRequest, RegenerateResponse } from '@/types';
+import type { ScriptParseResponse, Voice, TaskStatus, AudioFile, GenerateRequest, RegenerateResponse, Line } from '@/types';
 
 const api = axios.create({
   baseURL: '/api',
@@ -24,6 +24,29 @@ export const voiceApi = {
   getVoices: async (): Promise<Voice[]> => {
     const { data } = await api.get('/voices');
     return data;
+  },
+};
+
+export const subtitleApi = {
+  // 预览字幕分割效果
+  preview: async (data: {
+    lines: Line[];
+    max_length: number;
+    max_preview_lines?: number;
+    use_ai?: boolean;
+  }): Promise<{ preview: string[]; total_subtitles: number }> => {
+    const { data: result } = await api.post('/subtitle/preview', data);
+    return result;
+  },
+
+  // 生成字幕文件
+  generate: async (data: {
+    lines: Line[];
+    max_length: number;
+    use_ai?: boolean;
+  }): Promise<{ filename: string; url: string; content: string }> => {
+    const { data: result } = await api.post('/subtitle/generate', data);
+    return result;
   },
 };
 
