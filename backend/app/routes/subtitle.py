@@ -9,7 +9,7 @@ logger = logging.getLogger("subtitle_routes")
 
 from ..models.schemas import Line
 from ..services.subtitle import generate_srt, preview_subtitle
-from ..services.ai_segment import split_sentences_with_ai, batch_split_all_in_one_call, generate_pinyin_subtitles, generate_english_subtitles
+from ..services.ai_segment import split_sentences_with_ai, batch_split_all_in_one_call, generate_pinyin_subtitles, generate_english_subtitles, generate_pinyin_subtitles_with_chunking, generate_english_subtitles_with_chunking
 
 router = APIRouter(prefix="/api/subtitle", tags=["subtitle"])
 
@@ -199,11 +199,20 @@ async def generate_pinyin_subtitle(request: PinyinSubtitleRequest):
         raise HTTPException(status_code=400, detail="字幕内容不能为空")
 
     try:
-        logger.info(f"[generate_pinyin_subtitle] 开始生成拼音字幕")
-        pinyin_content = await generate_pinyin_subtitles(
-            request.content,
-            provider=request.ai_provider
-        )
+        logger.info(f"[generate_pinyin_subtitle] 开始生成拼音字幕，长度: {len(request.content)}")
+
+        # 根据内容长度选择处理方式
+        if len(request.content) > 20000:  # 超过2万字符使用分块处理
+            pinyin_content = await generate_pinyin_subtitles_with_chunking(
+                request.content,
+                provider=request.ai_provider
+            )
+            logger.info(f"[generate_pinyin_subtitle] 使用分块处理完成")
+        else:
+            pinyin_content = await generate_pinyin_subtitles(
+                request.content,
+                provider=request.ai_provider
+            )
 
         # 生成文件名：基础名 + py.srt
         base_name = request.base_name if request.base_name else "subtitle"
@@ -232,11 +241,20 @@ async def generate_english_subtitle(request: EnglishSubtitleRequest):
         raise HTTPException(status_code=400, detail="字幕内容不能为空")
 
     try:
-        logger.info(f"[generate_english_subtitle] 开始生成英文字幕")
-        english_content = await generate_english_subtitles(
-            request.content,
-            provider=request.ai_provider
-        )
+        logger.info(f"[generate_english_subtitle] 开始生成英文字幕，长度: {len(request.content)}")
+
+        # 根据内容长度选择处理方式
+        if len(request.content) > 20000:  # 超过2万字符使用分块处理
+            english_content = await generate_english_subtitles_with_chunking(
+                request.content,
+                provider=request.ai_provider
+            )
+            logger.info(f"[generate_english_subtitle] 使用分块处理完成")
+        else:
+            english_content = await generate_english_subtitles(
+                request.content,
+                provider=request.ai_provider
+            )
 
         # 生成文件名：基础名 + en.srt
         base_name = request.base_name if request.base_name else "subtitle"
@@ -254,3 +272,89 @@ async def generate_english_subtitle(request: EnglishSubtitleRequest):
     except Exception as e:
         logger.error(f"英文字幕生成失败: {e}")
         raise HTTPException(status_code=500, detail=f"英文字幕生成失败: {str(e)}")
+
+
+class TextProcessRequest(BaseModel):
+    text: str
+    max_length: int = 40
+    ai_provider: str = "deepseek"
+
+
+class TextProcessResponse(BaseModel):
+    processed_text: str
+    sentences: List[str]
+
+
+def _remove_speaker_names(text: str) -> str:
+    """
+    移除对话文本中的角色名和冒号。
+    格式："角色名: 台词" 或 "角色名：台词"
+    只移除行首的角色名和冒号，不处理其他位置的冒号。
+    """
+    lines = text.split('\n')
+    cleaned_lines = []
+
+    for line in lines:
+        # 检查行是否包含冒号（中文或英文）
+        colon_index = line.find(':')
+        chinese_colon_index = line.find('：')
+
+        # 使用第一个找到的冒号
+        colon_pos = -1
+        if colon_index != -1 and chinese_colon_index != -1:
+            colon_pos = min(colon_index, chinese_colon_index)
+        elif colon_index != -1:
+            colon_pos = colon_index
+        elif chinese_colon_index != -1:
+            colon_pos = chinese_colon_index
+
+        # 如果找到冒号且冒号位置合理（不是行尾），移除角色名部分
+        if colon_pos > 0 and colon_pos < len(line) - 1:
+            # 移除角色名和冒号，保留台词部分
+            dialogue = line[colon_pos + 1:].strip()
+            cleaned_lines.append(dialogue)
+        else:
+            # 没有角色名格式，保留原行
+            cleaned_lines.append(line.strip())
+
+    return '\n'.join(cleaned_lines)
+
+
+@router.post("/process-text", response_model=TextProcessResponse)
+async def process_text(request: TextProcessRequest):
+    """
+    使用AI对对话文本进行智能断句处理（字幕生成前置处理）
+    不包含时间戳，只进行AI断句
+    """
+    if not request.text.strip():
+        raise HTTPException(status_code=400, detail="文本内容不能为空")
+
+    try:
+        logger.info(f"[process_text] 开始AI文本处理，原始长度={len(request.text)}，max_length={request.max_length}")
+
+        # 预处理：移除角色名和冒号
+        preprocessed_text = _remove_speaker_names(request.text)
+        logger.info(f"[process_text] 预处理后长度={len(preprocessed_text)}")
+
+        if preprocessed_text != request.text:
+            logger.info(f"[process_text] 已移除角色名和冒号")
+
+        # 使用现有的AI分割函数
+        sentences = await split_sentences_with_ai(
+            preprocessed_text,
+            max_length=request.max_length,
+            provider=request.ai_provider
+        )
+
+        # 将句子连接成处理后的文本（每行一句）
+        processed_text = "\n".join(sentences)
+
+        logger.info(f"[process_text] AI处理完成，生成{len(sentences)}个句子")
+
+        return TextProcessResponse(
+            processed_text=processed_text,
+            sentences=sentences
+        )
+    except Exception as e:
+        logger.error(f"文本处理失败: {e}")
+        raise HTTPException(status_code=500, detail=f"文本处理失败: {str(e)}")

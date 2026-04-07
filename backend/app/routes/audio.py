@@ -2,10 +2,11 @@ import os
 import uuid
 from fastapi import APIRouter, HTTPException, BackgroundTasks
 from fastapi.responses import FileResponse, StreamingResponse
+from pydantic import BaseModel
 from typing import Dict, List
 import asyncio
 
-from ..models.schemas import GenerateRequest, TaskStatus, AudioFile
+from ..models.schemas import GenerateRequest, TaskStatus, AudioFile, Line
 from ..services.tts import generate_batch
 from ..services.parser import parse_script
 
@@ -344,3 +345,43 @@ async def list_generated_files():
             })
 
     return {"files": files}
+
+
+class MergeAudioRequest(BaseModel):
+    lines: List[Line]
+    script_name: str = "merged"
+
+
+@router.post("/merge")
+async def merge_audio(request: MergeAudioRequest):
+    """
+    将所有单条音频按顺序合并为一个完整的 WAV 文件
+    """
+    from ..services.subtitle import merge_audio_files
+
+    if not request.lines:
+        raise HTTPException(status_code=400, detail="没有需要合并的台词")
+
+    try:
+        merged_path, segment_offsets = merge_audio_files(
+            request.lines,
+            OUTPUT_DIR,
+            script_name=request.script_name
+        )
+
+        if not merged_path:
+            raise HTTPException(status_code=400, detail="没有找到可合并的音频文件")
+
+        merged_filename = os.path.basename(merged_path)
+        return {
+            "filename": merged_filename,
+            "url": f"/output/{merged_filename}",
+            "segments": [
+                {"start": s, "end": e, "line_index": idx}
+                for s, e, idx in segment_offsets
+            ]
+        }
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"合并音频失败: {str(e)}")

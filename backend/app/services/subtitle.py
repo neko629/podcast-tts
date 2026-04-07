@@ -5,8 +5,12 @@ import logging
 import random
 import string
 from typing import List, Tuple, Optional
+from dotenv import load_dotenv
 from ..models.schemas import Line
 from .ai_segment import get_llm
+
+# 加载环境变量
+load_dotenv()
 
 try:
     from faster_whisper import WhisperModel
@@ -24,8 +28,83 @@ def _get_whisper_model():
     """获取或初始化 Whisper 模型（全局单例）"""
     global _whisper_model
     if _whisper_model is None:
-        _whisper_model = WhisperModel("base", device="cpu", compute_type="int8")
+        # 从环境变量获取 Hugging Face token
+        hf_token = os.getenv("HF_TOKEN")
+        model_kwargs = {
+            "model_size_or_path": "large",
+            "device": "cuda",
+            "compute_type": "float16",
+        }
+        if hf_token:
+            model_kwargs["token"] = hf_token
+            logging.getLogger("subtitle_service").info(f"[Whisper] 使用 HF_TOKEN 下载模型")
+
+        _whisper_model = WhisperModel(**model_kwargs)
     return _whisper_model
+
+
+def merge_audio_files(
+    lines: List[Line],
+    output_dir: str,
+    script_name: str = "merged"
+) -> Tuple[Optional[str], List[Tuple[float, float, int]]]:
+    """
+    将多个单条 WAV 按 index 顺序合并为一个完整的 WAV 文件。
+
+    返回:
+        (merged_file_path, segment_offsets)
+        segment_offsets: [(start_time, end_time, line_index), ...]
+        每个元素记录该行音频在合并文件中的起止时间
+    """
+    sorted_lines = sorted(lines, key=lambda l: l.index)
+    audio_files = []
+    for line in sorted_lines:
+        audio_file = f"{line.index:03d}_{line.speaker}.wav"
+        audio_path = os.path.join(output_dir, audio_file)
+        if os.path.exists(audio_path):
+            audio_files.append((audio_path, line.index))
+
+    if not audio_files:
+        logger.warning("[merge_audio] 没有找到任何音频文件")
+        return None, []
+
+    # 读取第一个文件获取参数
+    with wave.open(audio_files[0][0], 'rb') as first:
+        params = first.getparams()
+        n_channels = params.nchannels
+        sampwidth = params.sampwidth
+        framerate = params.framerate
+
+    # 合并所有音频数据
+    all_frames = b""
+    segment_offsets = []
+
+    for audio_path, line_index in audio_files:
+        start_time = len(all_frames) / (n_channels * sampwidth * framerate)
+        try:
+            with wave.open(audio_path, 'rb') as wf:
+                frames = wf.readframes(wf.getnframes())
+                all_frames += frames
+        except Exception as e:
+            logger.error(f"[merge_audio] 读取 {audio_path} 失败: {e}")
+            continue
+        end_time = len(all_frames) / (n_channels * sampwidth * framerate)
+        segment_offsets.append((start_time, end_time, line_index))
+
+    # 写入合并文件
+    merged_filename = f"{script_name}_merged.wav"
+    merged_path = os.path.join(output_dir, merged_filename)
+
+    with wave.open(merged_path, 'wb') as out:
+        out.setnchannels(n_channels)
+        out.setsampwidth(sampwidth)
+        out.setframerate(framerate)
+        out.writeframes(all_frames)
+
+    duration = len(all_frames) / (n_channels * sampwidth * framerate)
+    logger.info(f"[merge_audio] 合并完成: {merged_path}, 总时长: {duration:.2f}s, {len(segment_offsets)} 段")
+
+    return merged_path, segment_offsets
 
 
 def align_sentences_with_whisper(
@@ -34,7 +113,8 @@ def align_sentences_with_whisper(
     provider: str = "deepseek"
 ) -> List[Tuple[float, float, str]]:
     """
-    用 Whisper 识别词级时间戳，再交给 AI 把正确文本对齐到时间轴上。
+    用 Whisper 识别词级时间戳，然后用算法把字幕句子对齐到时间轴上。
+    不依赖 AI 对齐，纯算法匹配更稳定。
     """
     if not WHISPER_AVAILABLE or not sentences:
         return []
@@ -45,7 +125,7 @@ def align_sentences_with_whisper(
             audio_path,
             language="zh",
             beam_size=5,
-            vad_filter=True,
+            vad_filter=False,
             word_timestamps=True,
         )
         segments = list(segments_iter)
@@ -66,70 +146,55 @@ def align_sentences_with_whisper(
         else:
             word_segs.append({"word": seg.text.strip(), "start": round(seg.start, 3), "end": round(seg.end, 3)})
 
+    if not word_segs:
+        return []
+
+    logger.info(f"[Whisper] 共 {len(word_segs)} 个词, 总时长: {word_segs[0]['start']:.3f} - {word_segs[-1]['end']:.3f}")
+
     # 只有一句直接返回整段时间
     if len(sentences) == 1:
         return [(word_segs[0]["start"], word_segs[-1]["end"], sentences[0])]
 
-    # 把 Whisper 时间戳 + AI 断句发给 AI 做对齐
-    whisper_json = json.dumps(word_segs, ensure_ascii=False)
-    sentences_json = json.dumps(sentences, ensure_ascii=False)
+    # 纯算法对齐：按字符数比例分配 Whisper 词
+    # 计算每句的字符数（去空格），按比例将词分配给各句
+    char_counts = [len(s.replace(" ", "")) for s in sentences]
+    total_chars = sum(char_counts)
 
-    prompt = f"""你是字幕时间轴对齐专家。
+    if total_chars == 0:
+        return []
 
-下面是语音识别给出的词级时间戳（可能有同音字错误，但时间是准确的）：
-{whisper_json}
+    result = []
+    word_idx = 0
+    total_words = len(word_segs)
 
-下面是正确的字幕分行结果（文字正确，但没有时间戳）：
-{sentences_json}
+    for i, sent in enumerate(sentences):
+        # 按字符比例计算这句应该分配多少个词
+        if i == len(sentences) - 1:
+            # 最后一句拿走剩余所有词
+            n_words = total_words - word_idx
+        else:
+            ratio = char_counts[i] / total_chars
+            n_words = max(1, round(total_words * ratio))
+            # 确保不会超出剩余词数（至少给后面每句留1个词）
+            remaining_sentences = len(sentences) - i - 1
+            max_take = total_words - word_idx - remaining_sentences
+            n_words = min(n_words, max(1, max_take))
 
-任务：根据词级时间戳的时间分布，为每句正确字幕分配合理的 start 和 end 时间（单位：秒）。
-规则：
-1. 按照识别词的顺序，把字幕句子依次对应到时间轴上
-2. 相邻句子的时间不能重叠，end <= 下一句的 start
-3. 第一句 start 不早于识别词第一个词的 start，最后一句 end 不晚于识别词最后一个词的 end
-4. 每句时长按该句字符数（去空格）在总字数中的比例从总时长中分配
+        if word_idx >= total_words:
+            # 词已用完，用最后一个词的时间
+            last_end = word_segs[-1]["end"]
+            result.append((last_end, last_end, sent))
+            continue
 
-只返回 JSON 数组，格式：
-[{{"start": 0.0, "end": 1.5, "text": "字幕内容"}}, ...]
-不要任何解释。"""
+        seg_start = word_segs[word_idx]["start"]
+        seg_end_idx = min(word_idx + n_words - 1, total_words - 1)
+        seg_end = word_segs[seg_end_idx]["end"]
 
-    try:
-        llm = get_llm(provider=provider)
-        from langchain_core.messages import HumanMessage
-        response = llm.invoke([HumanMessage(content=prompt)])
-        raw = response.content.strip()
-        # 去掉可能的 markdown 代码块
-        if raw.startswith("```"):
-            raw = raw.split("```")[1]
-            if raw.startswith("json"):
-                raw = raw[4:]
-        aligned = json.loads(raw)
-        result = [(item["start"], item["end"], item["text"]) for item in aligned]
-        # 消除字幕间隙：上一句 end = 下一句 start
-        for i in range(len(result) - 1):
-            result[i] = (result[i][0], result[i + 1][0], result[i][2])
-        logger.info(f"[AI对齐] 结果: {result}")
-        return result
-    except Exception as e:
-        logger.error(f"[AI对齐] 失败，回退到字符比例分配: {e}")
-        # 回退：按字符数比例均分
-        audio_start = word_segs[0]["start"]
-        audio_end = word_segs[-1]["end"]
-        total_chars = sum(len(s.replace(" ", "")) for s in sentences)
-        if total_chars == 0:
-            return []
-        result = []
-        t = audio_start
-        total_duration = audio_end - audio_start
-        for sent in sentences:
-            chars = len(sent.replace(" ", ""))
-            dur = total_duration * chars / total_chars
-            result.append((t, t + dur, sent))
-            t += dur
-        # 消除字幕间隙：上一句 end = 下一句 start
-        for i in range(len(result) - 1):
-            result[i] = (result[i][0], result[i + 1][0], result[i][2])
-        return result
+        result.append((seg_start, seg_end, sent))
+        word_idx = seg_end_idx + 1
+
+    logger.info(f"[算法对齐] 结果: {[(round(s,3), round(e,3), t) for s,e,t in result]}")
+    return result
 
 # 创建subtitle_service的logger
 _subtitle_logger = logging.getLogger("subtitle_service")
@@ -170,26 +235,44 @@ def split_text_by_length(text: str, max_length: int, ai_sentences: List[str] = N
         max_length: 每句最大字符数
         ai_sentences: AI 断句结果，如果有则优先使用
     """
-    # 如果有 AI 断句结果，直接使用
+    # 如果有 AI 断句结果，使用但需要二次检查长度
     if ai_sentences:
-        return [s.strip() for s in ai_sentences if s.strip()]
+        result = []
+        for s in ai_sentences:
+            s = s.strip()
+            if not s:
+                continue
+            if len(s) <= max_length:
+                result.append(s)
+            else:
+                # AI 断句结果超长，按 max_length 强制拆分
+                result.extend(_force_split(s, max_length))
+        return result
 
     # 没有 AI 结果时，按 max_length 分割文本
     text = text.strip()
     if not text:
         return []
 
-    parts = []
-    current = ""
-    for char in text:
-        if len(current) >= max_length:
-            parts.append(current)
-            current = char
-        else:
-            current += char
-    if current:
-        parts.append(current)
+    return _force_split(text, max_length)
 
+
+def _force_split(text: str, max_length: int) -> List[str]:
+    """按 max_length 强制拆分文本，尽量在空格处断开"""
+    if len(text) <= max_length:
+        return [text]
+
+    parts = []
+    while len(text) > max_length:
+        # 在 max_length 范围内找最后一个空格
+        cut = text.rfind(' ', 0, max_length)
+        if cut <= 0:
+            # 没有空格，直接硬切
+            cut = max_length
+        parts.append(text[:cut].strip())
+        text = text[cut:].strip()
+    if text:
+        parts.append(text)
     return parts
 
 
@@ -204,22 +287,154 @@ def generate_srt(
     """
     生成SRT字幕文件
 
+    如果存在合并音频（{script_name}_merged.wav），则用合并音频跑一次 Whisper 对齐，
+    避免分段音频拼接导致的时间漂移。
+
     返回: (srt_content, filename)
     """
     logger.info(f"[generate_srt] 调用: max_length={max_length}, ai_sentences_map={ai_sentences_map}")
 
+    # 收集所有断句结果
+    all_text_parts = []
+    for line in lines:
+        ai_sentences = ai_sentences_map.get(line.index) if ai_sentences_map else None
+        text_parts = split_text_by_length(line.text, max_length, ai_sentences)
+        all_text_parts.append((line, text_parts))
+
+    # 检查是否存在合并音频
+    merged_audio_path = os.path.join(output_dir, f"{script_name}_merged.wav")
+    if not os.path.exists(merged_audio_path):
+        # 尝试查找任何 _merged.wav 文件
+        for f in os.listdir(output_dir):
+            if f.endswith("_merged.wav"):
+                merged_audio_path = os.path.join(output_dir, f)
+                break
+
+    if os.path.exists(merged_audio_path) and WHISPER_AVAILABLE:
+        logger.info(f"[generate_srt] 使用合并音频: {merged_audio_path}")
+        srt_content = _generate_srt_from_merged(all_text_parts, merged_audio_path, ai_provider)
+    else:
+        logger.info(f"[generate_srt] 使用分段音频")
+        srt_content = _generate_srt_from_segments(all_text_parts, output_dir, ai_provider)
+
+    # 最终处理：消除相邻字幕之间的间隙
+    srt_content = _fill_gaps(srt_content)
+
+    # 生成文件名: 脚本名 + 4位随机数
+    random_suffix = ''.join(random.choices(string.digits, k=4))
+    base_name = script_name if script_name else "subtitle"
+    filename = f"{base_name}{random_suffix}.srt"
+    file_path = os.path.join(output_dir, filename)
+
+    with open(file_path, 'w', encoding='utf-8') as f:
+        f.write(srt_content)
+
+    return srt_content, filename
+
+
+def _generate_srt_from_merged(
+    all_text_parts: List[Tuple[Line, List[str]]],
+    merged_audio_path: str,
+    ai_provider: str = "deepseek"
+) -> str:
+    """
+    基于合并音频生成字幕。
+    策略：逐段用 Whisper 识别单个音频文件（短音频识别更准确），
+    然后用合并时记录的精确偏移量将时间戳映射到合并音频的时间轴上。
+    """
+    output_dir = os.path.dirname(merged_audio_path)
+
+    # 先计算每个单独音频文件在合并文件中的真实偏移量
+    segment_offsets = {}  # line_index -> start_offset
+    sorted_parts = sorted(all_text_parts, key=lambda x: x[0].index)
+
+    # 读取合并音频的参数来计算偏移
+    try:
+        with wave.open(merged_audio_path, 'rb') as mf:
+            n_channels = mf.getnchannels()
+            sampwidth = mf.getsampwidth()
+            framerate = mf.getframerate()
+    except Exception as e:
+        logger.error(f"[generate_srt_from_merged] 无法读取合并音频参数: {e}")
+        return ""
+
+    # 按顺序累加每个单独文件的时长来计算精确偏移
+    current_offset = 0.0
+    for line, text_parts in sorted_parts:
+        audio_file = f"{line.index:03d}_{line.speaker}.wav"
+        audio_path = os.path.join(output_dir, audio_file)
+        segment_offsets[line.index] = current_offset
+        if os.path.exists(audio_path):
+            current_offset += get_audio_duration(audio_path)
+
+    logger.info(f"[generate_srt_from_merged] 偏移量: {segment_offsets}")
+
+    # 逐段 Whisper 识别 + 偏移
+    srt_lines = []
+    subtitle_index = 1
+
+    for line, text_parts in sorted_parts:
+        if not text_parts:
+            continue
+
+        audio_file = f"{line.index:03d}_{line.speaker}.wav"
+        audio_path = os.path.join(output_dir, audio_file)
+        offset = segment_offsets.get(line.index, 0.0)
+
+        if os.path.exists(audio_path):
+            aligned = align_sentences_with_whisper(audio_path, text_parts, provider=ai_provider)
+            if aligned:
+                for seg_start, seg_end, part in aligned:
+                    if not part.strip():
+                        continue
+                    # 加上合并偏移量
+                    abs_start = offset + seg_start
+                    abs_end = offset + seg_end
+                    srt_lines.append(f"{subtitle_index}")
+                    srt_lines.append(f"{format_srt_time(abs_start)} --> {format_srt_time(abs_end)}")
+                    srt_lines.append(part)
+                    srt_lines.append("")
+                    subtitle_index += 1
+                continue
+
+        # 回退：按该段音频时长平均分配
+        if os.path.exists(audio_path):
+            total_duration = get_audio_duration(audio_path)
+        else:
+            total_duration = 3.0
+
+        sentence_count = len([p for p in text_parts if p.strip()])
+        if sentence_count == 0:
+            continue
+        duration = total_duration / sentence_count
+        t = offset
+
+        for part in text_parts:
+            if not part.strip():
+                continue
+            srt_lines.append(f"{subtitle_index}")
+            srt_lines.append(f"{format_srt_time(t)} --> {format_srt_time(t + duration)}")
+            srt_lines.append(part)
+            srt_lines.append("")
+            subtitle_index += 1
+            t += duration
+
+    return "\n".join(srt_lines)
+
+
+def _generate_srt_from_segments(
+    all_text_parts: List[Tuple[Line, List[str]]],
+    output_dir: str,
+    ai_provider: str = "deepseek"
+) -> str:
+    """
+    基于分段音频逐个用 Whisper 对齐（原有逻辑）。
+    """
     srt_lines = []
     subtitle_index = 1
     current_time = 0.0
 
-    for line in lines:
-        # 分割文本
-        ai_sentences = ai_sentences_map.get(line.index) if ai_sentences_map else None
-        logger.info(f"[generate_srt] line.index={line.index}, ai_sentences={ai_sentences}")
-        text_parts = split_text_by_length(line.text, max_length, ai_sentences)
-        logger.info(f"[generate_srt] text_parts={text_parts}")
-
-        # 音频文件路径
+    for line, text_parts in all_text_parts:
         audio_file = f"{line.index:03d}_{line.speaker}.wav"
         audio_path = os.path.join(output_dir, audio_file)
 
@@ -227,6 +442,7 @@ def generate_srt(
         if text_parts and os.path.exists(audio_path):
             aligned = align_sentences_with_whisper(audio_path, text_parts, provider=ai_provider)
             if aligned:
+                last_seg_end = 0.0
                 for seg_start, seg_end, part in aligned:
                     if not part.strip():
                         continue
@@ -235,8 +451,8 @@ def generate_srt(
                     srt_lines.append(part)
                     srt_lines.append("")
                     subtitle_index += 1
-                # 用音频文件真实时长推进基准时间（而不是用字幕end），确保行间无缝
-                current_time += get_audio_duration(audio_path)
+                    last_seg_end = seg_end
+                current_time += last_seg_end
                 continue
 
         # 回退：按平均分配
@@ -252,21 +468,19 @@ def generate_srt(
             sentence_count = len(text_parts)
             duration = total_duration / sentence_count
 
-            start_time = format_srt_time(current_time)
-            end_time = format_srt_time(current_time + duration)
-
             srt_lines.append(f"{subtitle_index}")
-            srt_lines.append(f"{start_time} --> {end_time}")
+            srt_lines.append(f"{format_srt_time(current_time)} --> {format_srt_time(current_time + duration)}")
             srt_lines.append(part)
             srt_lines.append("")
 
             subtitle_index += 1
             current_time += duration
 
-    srt_content = "\n".join(srt_lines)
+    return "\n".join(srt_lines)
 
-    # 最终处理：消除相邻字幕之间的间隙
-    # 把上一条的 end 延伸到下一条的 start
+
+def _fill_gaps(srt_content: str) -> str:
+    """消除相邻字幕之间的间隙：把上一条的 end 延伸到下一条的 start"""
     entries = []
     block = []
     for raw_line in srt_content.split("\n"):
@@ -278,31 +492,18 @@ def generate_srt(
     if block:
         entries.append(block)
 
-    # 每个 entry: [index_line, time_line, text_line, ...]
     for i in range(len(entries) - 1):
         cur_time_line = entries[i][1]
         next_time_line = entries[i + 1][1]
         if "-->" in cur_time_line and "-->" in next_time_line:
             cur_start = cur_time_line.split("-->")[0].strip()
             next_start = next_time_line.split("-->")[0].strip()
-            # 把当前条的 end 改为下一条的 start
             entries[i][1] = f"{cur_start} --> {next_start}"
 
-    srt_content = "\n\n".join("\n".join(e) for e in entries)
-    if not srt_content.endswith("\n"):
-        srt_content += "\n"
-
-    # 生成文件名: 脚本名 + 4位随机数
-    random_suffix = ''.join(random.choices(string.digits, k=4))
-    base_name = script_name if script_name else "subtitle"
-    filename = f"{base_name}{random_suffix}.srt"
-    file_path = os.path.join(output_dir, filename)
-
-    # 写入文件
-    with open(file_path, 'w', encoding='utf-8') as f:
-        f.write(srt_content)
-
-    return srt_content, filename
+    result = "\n\n".join("\n".join(e) for e in entries)
+    if not result.endswith("\n"):
+        result += "\n"
+    return result
 
 
 def _parse_srt_time(time_str: str) -> float:

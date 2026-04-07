@@ -6,6 +6,7 @@ import { VoiceConfig } from '@/components/VoiceConfig';
 import { GenerationPanel } from '@/components/GenerationPanel';
 import { AudioPlayer } from '@/components/AudioPlayer';
 import { SubtitleGenerator } from '@/components/SubtitleGenerator';
+import { SubtitleToolbar } from '@/components/SubtitleToolbar';
 import { scriptApi, voiceApi, audioApi } from '@/services/api';
 import type { Line, Voice, TaskStatus, AudioFile } from '@/types';
 
@@ -197,6 +198,9 @@ export const Home: React.FC = () => {
           </div>
         </div>
       </header>
+
+      {/* 字幕工具栏 */}
+      <SubtitleToolbar />
 
       {/* 主内容 */}
       <main className="max-w-7xl mx-auto px-4 py-6">

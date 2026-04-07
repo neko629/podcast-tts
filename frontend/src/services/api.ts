@@ -71,6 +71,16 @@ export const subtitleApi = {
     const { data: result } = await api.post('/subtitle/english', data);
     return result;
   },
+
+  // AI处理文本（智能断句）
+  processText: async (data: {
+    text: string;
+    max_length: number;
+    ai_provider: string;
+  }): Promise<{ processed_text: string; sentences: string[] }> => {
+    const { data: result } = await api.post('/subtitle/process-text', data);
+    return result;
+  },
 };
 
 export const audioApi = {
@@ -116,5 +126,14 @@ export const audioApi = {
   stopTask: async (taskId: string): Promise<{ message: string; status?: string }> => {
     const { data } = await api.post(`/audio/stop/${taskId}`);
     return data;
+  },
+
+  // 合并所有音频为一个文件
+  mergeAudio: async (data: {
+    lines: Line[];
+    script_name: string;
+  }): Promise<{ filename: string; url: string; segments: { start: number; end: number; line_index: number }[] }> => {
+    const { data: result } = await api.post('/audio/merge', data);
+    return result;
   },
 };

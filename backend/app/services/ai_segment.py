@@ -77,6 +77,103 @@ def get_llm(provider: str = "deepseek"):
         raise ValueError(f"不支持的 AI 提供商: {provider}")
 
 
+def _check_ai_response_completeness(response, logger, function_name):
+    """检查AI响应是否完整"""
+    if hasattr(response, 'response_metadata'):
+        finish_reason = response.response_metadata.get('finish_reason')
+        if finish_reason == 'length':
+            logger.warning(f"[{function_name}] AI响应被截断 (finish_reason: {finish_reason})")
+            return False
+        elif finish_reason == 'stop':
+            logger.info(f"[{function_name}] AI响应完整 (finish_reason: {finish_reason})")
+            return True
+        else:
+            logger.info(f"[{function_name}] AI响应状态: {finish_reason}")
+            return finish_reason != 'length'
+    return True  # 默认认为完整
+
+
+def validate_srt_integrity(original_srt: str, processed_srt: str, operation: str) -> bool:
+    """验证处理后的SRT完整性"""
+    original_entries = [e for e in original_srt.strip().split('\n\n') if e.strip()]
+    processed_entries = [e for e in processed_srt.strip().split('\n\n') if e.strip()]
+
+    if len(original_entries) != len(processed_entries):
+        logger.warning(f"[{operation}] 条目数不匹配: 原始={len(original_entries)}, 处理={len(processed_entries)}")
+        return False
+
+    return True
+
+
+def _chunk_srt_content(srt_content: str, max_chunk_size: int = 15000) -> List[str]:
+    """将SRT内容分块，每块不超过指定字符数"""
+    chunks = []
+    current_chunk = []
+    current_size = 0
+
+    # 按字幕条目分割
+    entries = srt_content.strip().split('\n\n')
+
+    for entry in entries:
+        entry_size = len(entry)
+        if current_size + entry_size > max_chunk_size and current_chunk:
+            chunks.append('\n\n'.join(current_chunk))
+            current_chunk = [entry]
+            current_size = entry_size
+        else:
+            current_chunk.append(entry)
+            current_size += entry_size
+
+    if current_chunk:
+        chunks.append('\n\n'.join(current_chunk))
+
+    return chunks
+
+
+async def generate_english_subtitles_with_chunking(srt_content: str, provider: str = "deepseek") -> str:
+    """分块生成英文字幕"""
+    chunks = _chunk_srt_content(srt_content)
+
+    if len(chunks) == 1:
+        return await generate_english_subtitles(srt_content, provider)
+
+    logger.info(f"[英文翻译] 内容过长，分{len(chunks)}块处理")
+    results = []
+
+    for i, chunk in enumerate(chunks, 1):
+        logger.info(f"[英文翻译] 处理第{i}/{len(chunks)}块，大小: {len(chunk)}字符")
+        try:
+            chunk_result = await generate_english_subtitles(chunk, provider)
+            results.append(chunk_result)
+        except Exception as e:
+            logger.error(f"[英文翻译] 第{i}块处理失败: {e}")
+            raise
+
+    return '\n\n'.join(results)
+
+
+async def generate_pinyin_subtitles_with_chunking(srt_content: str, provider: str = "deepseek") -> str:
+    """分块生成拼音字幕"""
+    chunks = _chunk_srt_content(srt_content)
+
+    if len(chunks) == 1:
+        return await generate_pinyin_subtitles(srt_content, provider)
+
+    logger.info(f"[拼音转换] 内容过长，分{len(chunks)}块处理")
+    results = []
+
+    for i, chunk in enumerate(chunks, 1):
+        logger.info(f"[拼音转换] 处理第{i}/{len(chunks)}块，大小: {len(chunk)}字符")
+        try:
+            chunk_result = await generate_pinyin_subtitles(chunk, provider)
+            results.append(chunk_result)
+        except Exception as e:
+            logger.error(f"[拼音转换] 第{i}块处理失败: {e}")
+            raise
+
+    return '\n\n'.join(results)
+
+
 async def split_sentences_with_ai(text: str, max_length: int = 40, provider: str = "deepseek") -> List[str]:
     """
     使用 MiniMax AI 对文本进行智能断句
@@ -102,25 +199,27 @@ async def split_sentences_with_ai(text: str, max_length: int = 40, provider: str
         """你是一个专业的播客字幕编辑。请将以下中文文本智能地分割成简短的字幕句子。
 
 要求：
-1. 长度限制： 每行字幕不超过 {max_length} 个字符（包含所有字符：汉字、英文字母、空格、标点等）。如果超过，必须在语义合理处断行，绝不能因为原句没有标点就不断行。
+1. **长度限制（最高优先级）**：每行字幕不得超过 {max_length} 个字符（包含所有字符：汉字、英文字母、空格、标点等）。**任何一行超过此限制都是错误的，必须拆分。**
 2. 合并优先： 在长度允许的前提下，尽量将相邻的短语合并成一行，避免产生过短的字幕（少于4个字的行应尽量与相邻行合并）。
 3. 标点清理： 删除原文中所有的句号、逗号、感叹号、顿号。仅保留问号（？）。
-4. 空格代标点： 删除标点后，所有原标点位置（包括句号、逗号、感叹号、顿号）一律替换为一个半角空格，用空格模拟说话停顿感。多个短句合并成一行时，句与句之间同样用空格连接，不能直接拼接。
-5. 书名号保护： 书名号《》及其内部内容视为整体，禁止从中途断开。
-6. 强制断行： 即使原句没有任何标点，如果一行超过 {max_length} 个字符，也必须在主谓之间、因果转折等语义完整处强制断行。
+4. 空格代标点： 删除标点后，所有原标点位置一律替换为一个半角空格。
+5. 书名号保护： 书名号《》及其内部内容视为整体，禁止从中途断开。但如果书名号整体已超过 {max_length}，则必须拆分。
+6. 强制断行： 即使原句没有任何标点，如果一行超过 {max_length} 个字符，也必须在语义合理处（主谓之间、动宾之间、转折处）强制断行。
 7. 输出格式： 仅返回一个 JSON 字符串数组，每项为一行字幕。
+
+⚠️ 自查：返回前逐行检查，每行字符数必须 ≤ {max_length}，超过的必须拆分。
 
 示例（max_length=10）：
 输入：哈哈看来你今天早上起来很不容易
 输出：["哈哈 看来", "你今天早上", "起来很不容易"]
 
-示例（max_length=15）：
+示例（max_length=14）：
 输入：大家好，我是小悦！欢迎来到今天的《大白话中文》！
-输出：["大家好 我是小悦", "欢迎来到今天的《大白话中文》"]
+输出：["大家好 我是小悦", "欢迎来到今天的", "《大白话中文》"]
 
-示例（max_length=15）：
-输入：Leo，早上好！你看上去很累，昨晚没睡好吗？
-输出：["Leo 早上好", "你看上去很累 昨晚没睡好吗？"]
+示例（max_length=14）：
+输入：六点半，但是我每次都把它关掉，然后继续睡。
+输出：["六点半 但是我每次", "都把它关掉 然后继续睡"]
 
 待处理文本：
 {text}
@@ -237,6 +336,16 @@ Yeah, shall we go for a walk?
         llm = get_llm(provider=provider)
         from langchain_core.messages import HumanMessage
         response = llm.invoke([HumanMessage(content=prompt)])
+
+        # 检查响应完整性
+        if not _check_ai_response_completeness(response, logger, "英文翻译"):
+            raise Exception("AI响应被截断，请减少字幕内容或分段处理")
+
+        # 记录token使用情况
+        if hasattr(response, 'response_metadata') and 'token_usage' in response.response_metadata:
+            token_info = response.response_metadata['token_usage']
+            logger.info(f"[英文翻译] Token使用: 输入={token_info.get('prompt_tokens')}, 输出={token_info.get('completion_tokens')}, 总计={token_info.get('total_tokens')}")
+
         english_srt = response.content.strip()
 
         # 移除可能的 markdown 代码块
@@ -246,6 +355,11 @@ Yeah, shall we go for a walk?
                 english_srt = english_srt[3:].strip()
 
         logger.info(f"[英文翻译] 成功生成英文字幕，长度: {len(english_srt)}")
+
+        # 验证完整性（记录但不中断处理）
+        if not validate_srt_integrity(srt_content, english_srt, "英文翻译"):
+            logger.warning("[英文翻译] 完整性验证警告：条目数不匹配，但继续处理")
+
         return english_srt
 
     except Exception as e:
@@ -313,6 +427,16 @@ shì a wǒ men chū qù sàn bù ma
         llm = get_llm(provider=provider)
         from langchain_core.messages import HumanMessage
         response = llm.invoke([HumanMessage(content=prompt)])
+
+        # 检查响应完整性
+        if not _check_ai_response_completeness(response, logger, "拼音转换"):
+            raise Exception("AI响应被截断，请减少字幕内容或分段处理")
+
+        # 记录token使用情况
+        if hasattr(response, 'response_metadata') and 'token_usage' in response.response_metadata:
+            token_info = response.response_metadata['token_usage']
+            logger.info(f"[拼音转换] Token使用: 输入={token_info.get('prompt_tokens')}, 输出={token_info.get('completion_tokens')}, 总计={token_info.get('total_tokens')}")
+
         pinyin_srt = response.content.strip()
 
         # 移除可能的 markdown 代码块
@@ -322,6 +446,11 @@ shì a wǒ men chū qù sàn bù ma
                 pinyin_srt = pinyin_srt[3:].strip()
 
         logger.info(f"[拼音转换] 成功生成拼音字幕，长度: {len(pinyin_srt)}")
+
+        # 验证完整性（记录但不中断处理）
+        if not validate_srt_integrity(srt_content, pinyin_srt, "拼音转换"):
+            logger.warning("[拼音转换] 完整性验证警告：条目数不匹配，但继续处理")
+
         return pinyin_srt
 
     except Exception as e:
@@ -367,14 +496,16 @@ async def batch_split_all_in_one_call(
         """你是一个专业的播客字幕编辑。请将以下中文文本智能地分割成简短的字幕句子。
 
 要求：
-1. 长度限制： 每行字幕不超过 {max_length} 个字符（包含所有字符：汉字、英文字母、空格、标点等）。如果超过，必须在语义合理处断行，绝不能因为原句没有标点就不断行。
+1. **长度限制（最高优先级）**：每行字幕的纯文本（不含行号标记 [序号]）不得超过 {max_length} 个字符（包含所有字符：汉字、英文字母、空格、标点等）。**任何一行超过此限制都是错误的，必须拆分。**
 2. 合并优先： 在长度允许的前提下，尽量将相邻的短语合并成一行，避免产生过短的字幕（少于4个字的行应尽量与相邻行合并）。
 3. 标点清理： 删除原文中所有的句号、逗号、感叹号、顿号。仅保留问号（？）。
-4. 空格代标点： 删除标点后，所有原标点位置（包括句号、逗号、感叹号、顿号）一律替换为一个半角空格，用空格模拟说话停顿感。多个短句合并成一行时，句与句之间同样用空格连接，不能直接拼接。
-5. 书名号保护： 书名号《》及其内部内容视为整体，禁止从中途断开。
-6. 强制断行： 即使原句没有任何标点，如果一行超过 {max_length} 个字符，也必须在主谓之间、因果转折等语义完整处强制断行。
+4. 空格代标点： 删除标点后，所有原标点位置一律替换为一个半角空格。
+5. 书名号保护： 书名号《》及其内部内容视为整体，禁止从中途断开。但如果书名号整体已超过 {max_length}，则必须拆分。
+6. 强制断行： 即使原句没有任何标点，如果一行超过 {max_length} 个字符，也必须在语义合理处（主谓之间、动宾之间、转折处）强制断行。
 7. 输出格式： 仅返回一个 JSON 字符串数组，每项为一行字幕。
-8. 行号标记： 返回时用 [序号] 标注每句属于哪一行文本（序号为输入中每行开头的数字标记）。
+8. 行号标记： 返回时用 [序号] 标注每句属于哪一行文本。**[序号] 不计入字数。**
+
+⚠️ 自查：返回前逐行检查，去掉 [序号] 后每行字符数必须 ≤ {max_length}，超过的必须拆分。
 
 示例（max_length=10）：
 输入：
@@ -382,18 +513,18 @@ async def batch_split_all_in_one_call(
 
 输出：["[1]哈哈 看来", "[1]你今天早上", "[1]起来很不容易"]
 
-示例（max_length=15）：
+示例（max_length=14）：
 输入：
 [1]小悦: 大家好，我是小悦！欢迎来到今天的《大白话中文》！
-[2]小明: 今天我们聊一个有趣的话题。
+[2]Leo: 是啊，我每天早上都要和我的闹钟"打架"。
 
-输出：["[1]大家好 我是小悦", "[1]欢迎来到今天的《大白话中文》", "[2]今天我们聊一个有趣的话题"]
+输出：["[1]大家好 我是小悦", "[1]欢迎来到今天的", "[1]《大白话中文》", "[2]是啊 我每天早上", "[2]都要和我的闹钟 打架"]
 
-示例（max_length=15）：
+示例（max_length=14）：
 输入：
-[1]Leo: Leo，早上好！你看上去很累，昨晚没睡好吗？
+[1]Leo: 六点半，但是我每次都把它关掉，然后继续睡。
 
-输出：["[1]Leo 早上好", "[1]你看上去很累 昨晚没睡好吗？"]
+输出：["[1]六点半 但是我每次", "[1]都把它关掉 然后继续睡"]
 
 待处理文本：
 {text}

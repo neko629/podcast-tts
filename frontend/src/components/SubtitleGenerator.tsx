@@ -1,8 +1,8 @@
 import React, { useState } from 'react';
-import { FileText, Download, X, AlertCircle, Languages, Globe } from 'lucide-react';
+import { FileText, Download, X, AlertCircle, Languages, Globe, Merge } from 'lucide-react';
 import * as Slider from '@radix-ui/react-slider';
 import type { Line } from '@/types';
-import { subtitleApi } from '@/services/api';
+import { subtitleApi, audioApi } from '@/services/api';
 
 interface SubtitleGeneratorProps {
   lines: Line[];
@@ -16,7 +16,7 @@ export const SubtitleGenerator: React.FC<SubtitleGeneratorProps> = ({
   scriptName,
 }) => {
   const [isOpen, setIsOpen] = useState(false);
-  const [selectedLength, setSelectedLength] = useState(14);
+  const [selectedLength, setSelectedLength] = useState(15);
   const [aiProvider, setAiProvider] = useState('deepseek');
   const [preview, setPreview] = useState<string[]>([]);
   const [totalSubtitles, setTotalSubtitles] = useState(0);
@@ -28,11 +28,32 @@ export const SubtitleGenerator: React.FC<SubtitleGeneratorProps> = ({
   const [baseFileName, setBaseFileName] = useState<string>('');
   const [isGeneratingPinyin, setIsGeneratingPinyin] = useState(false);
   const [isGeneratingEnglish, setIsGeneratingEnglish] = useState(false);
+  const [isMerging, setIsMerging] = useState(false);
+  const [isMerged, setIsMerged] = useState(false);
 
   // 获取需要生成字幕的台词（只取已生成音频的）
   const linesToSubtitle = lines.filter((line) =>
     generatedFiles.some((f) => f.index === line.index)
   );
+
+  const handleMerge = async () => {
+    setIsMerging(true);
+    setError(null);
+
+    try {
+      await audioApi.mergeAudio({
+        lines: linesToSubtitle,
+        script_name: scriptName || 'merged',
+      });
+      setIsMerged(true);
+    } catch (error: any) {
+      const msg = error?.response?.data?.detail ?? error?.message ?? '合并音频失败';
+      console.error('合并音频失败:', error);
+      setError(msg);
+    } finally {
+      setIsMerging(false);
+    }
+  };
 
   const handleOpen = async () => {
     setIsOpen(true);
@@ -181,13 +202,27 @@ export const SubtitleGenerator: React.FC<SubtitleGeneratorProps> = ({
 
   return (
     <>
-      <button
-        onClick={handleOpen}
-        className="flex items-center gap-2 px-4 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 transition-colors"
-      >
-        <FileText className="h-4 w-4" />
-        生成字幕
-      </button>
+      <div className="flex items-center gap-2">
+        <button
+          onClick={handleMerge}
+          disabled={isMerging || isMerged}
+          className={`flex items-center gap-2 px-4 py-2 rounded-lg transition-colors ${
+            isMerged
+              ? 'bg-gray-100 text-gray-500 cursor-default'
+              : 'bg-orange-600 text-white hover:bg-orange-700'
+          } disabled:opacity-50`}
+        >
+          <Merge className="h-4 w-4" />
+          {isMerging ? '合并中...' : isMerged ? '已合并' : '合并音频'}
+        </button>
+        <button
+          onClick={handleOpen}
+          className="flex items-center gap-2 px-4 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 transition-colors"
+        >
+          <FileText className="h-4 w-4" />
+          生成字幕
+        </button>
+      </div>
 
       {isOpen && (
         <div className="fixed inset-0 z-50 flex items-center justify-center">
