@@ -47,9 +47,9 @@ export const FileUpload: React.FC<FileUploadProps> = ({
             accept=".txt"
             onChange={handleFileInput}
             className="hidden"
-            id="file-input"
+            id="script-file-input"
           />
-          <label htmlFor="file-input" className="cursor-pointer">
+          <label htmlFor="script-file-input" className="cursor-pointer">
             <Upload className="mx-auto h-12 w-12 text-gray-400" />
             <p className="mt-2 text-sm text-gray-600">
               点击或拖拽上传剧本文件

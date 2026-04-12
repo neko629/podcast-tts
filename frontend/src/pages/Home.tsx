@@ -155,6 +155,31 @@ export const Home: React.FC = () => {
     }
   }, [taskId]);
 
+  // 重新生成完成回调
+  const handleRegenerateComplete = useCallback(async (regenerateTaskId: string) => {
+    try {
+      const result = await audioApi.getTaskResults(regenerateTaskId);
+      if (result.files && result.files.length > 0) {
+        const newFile = result.files[0];
+        // 更新对应文件的状态
+        setGeneratedFiles((prev) =>
+          prev.map((f) => (f.index === newFile.index ? newFile : f))
+        );
+      }
+    } catch (error) {
+      console.error('Failed to get regenerate results:', error);
+    }
+  }, []);
+
+  // 文字更新回调（编辑文字后同步更新剧本）
+  const handleTextUpdate = useCallback((index: number, newText: string) => {
+    setLines((prev) =>
+      prev.map((line) =>
+        line.index === index ? { ...line, text: newText } : line
+      )
+    );
+  }, []);
+
   // 轮询任务状态
   useEffect(() => {
     if (!taskId || !isGenerating) return;
@@ -300,6 +325,8 @@ export const Home: React.FC = () => {
                   lines={lines}
                   voiceConfig={voiceConfig}
                   rate={rate}
+                  onRegenerateComplete={handleRegenerateComplete}
+                  onTextUpdate={handleTextUpdate}
                 />
               </section>
             )}
