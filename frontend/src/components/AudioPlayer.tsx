@@ -11,6 +11,8 @@ interface AudioPlayerProps {
   rate: number;
   onRegenerateComplete?: (taskId: string) => void;
   onTextUpdate?: (index: number, newText: string) => void;
+  onRegenerateFailed?: (failedIndices: number[]) => void;
+  isRegeneratingFailed?: boolean;
 }
 
 const POLL_INTERVAL = 1000;
@@ -350,6 +352,8 @@ export const AudioPlayer: React.FC<AudioPlayerProps> = ({
   rate,
   onRegenerateComplete,
   onTextUpdate,
+  onRegenerateFailed,
+  isRegeneratingFailed = false,
 }) => {
   // 自动连续播放开关
   const [autoPlayNext, setAutoPlayNext] = useState(false);
@@ -359,6 +363,18 @@ export const AudioPlayer: React.FC<AudioPlayerProps> = ({
   // 获取成功生成的文件索引列表（用于连续播放）
   const successFiles = files.filter(f => f.success);
   const successIndices = successFiles.map(f => f.index);
+
+  // 计算失败的文件
+  const failedFiles = files.filter(f => !f.success);
+  const failedCount = failedFiles.length;
+  const failedIndices = failedFiles.map(f => f.index);
+
+  // 一键重新生成失败项
+  const handleRegenerateFailed = () => {
+    if (onRegenerateFailed && failedCount > 0) {
+      onRegenerateFailed(failedIndices);
+    }
+  };
 
   // 播放指定索引的音频
   const handlePlay = useCallback((index: number) => {
@@ -425,9 +441,31 @@ export const AudioPlayer: React.FC<AudioPlayerProps> = ({
             </button>
           )}
         </div>
-        <span className="text-xs text-gray-500">
-          成功 {successCount}/{files.length}
-        </span>
+        <div className="flex items-center gap-3">
+          {/* 失败数量和重试按钮 */}
+          {failedCount > 0 && (
+            <div className="flex items-center gap-2">
+              <span className="text-xs text-red-600 font-medium">
+                {failedCount} 条失败
+              </span>
+              <button
+                onClick={handleRegenerateFailed}
+                disabled={isRegeneratingFailed || failedCount === 0}
+                className={`flex items-center gap-1 px-2 py-1 text-xs rounded transition-colors ${
+                  isRegeneratingFailed
+                    ? 'bg-gray-100 text-gray-400 cursor-not-allowed'
+                    : 'bg-red-100 text-red-600 hover:bg-red-200'
+                }`}
+              >
+                <RefreshCw className={`h-3 w-3 ${isRegeneratingFailed ? 'animate-spin' : ''}`} />
+                <span>{isRegeneratingFailed ? '重试中...' : '重试失败项'}</span>
+              </button>
+            </div>
+          )}
+          <span className="text-xs text-gray-500">
+            成功 {successCount}/{files.length}
+          </span>
+        </div>
       </div>
 
       <div className="space-y-2 max-h-80 overflow-y-auto">

@@ -33,6 +33,10 @@ export const Home: React.FC = () => {
   const [taskId, setTaskId] = useState<string | null>(null);
   const [generatedFiles, setGeneratedFiles] = useState<AudioFile[]>([]);
 
+  // 批量重新生成失败项
+  const [isRegeneratingFailed, setIsRegeneratingFailed] = useState(false);
+  const [failedTaskId, setFailedTaskId] = useState<string | null>(null);
+
   // 加载可用语音
   useEffect(() => {
     const loadVoices = async () => {
@@ -180,6 +184,28 @@ export const Home: React.FC = () => {
     );
   }, []);
 
+  // 一键重新生成失败项
+  const handleRegenerateFailed = useCallback(async (failedIndices: number[]) => {
+    if (failedIndices.length === 0) return;
+
+    setIsRegeneratingFailed(true);
+
+    try {
+      const { task_id } = await audioApi.generate({
+        lines,
+        voice_config: voiceConfig,
+        line_indices: failedIndices,
+        rate,
+      });
+
+      setFailedTaskId(task_id);
+    } catch (error) {
+      console.error('Failed to start regeneration:', error);
+      alert('重新生成失败项启动失败');
+      setIsRegeneratingFailed(false);
+    }
+  }, [lines, voiceConfig, rate]);
+
   // 轮询任务状态
   useEffect(() => {
     if (!taskId || !isGenerating) return;
@@ -206,6 +232,45 @@ export const Home: React.FC = () => {
 
     return () => clearInterval(interval);
   }, [taskId, isGenerating]);
+
+  // 轮询失败项重新生成任务状态
+  useEffect(() => {
+    if (!failedTaskId || !isRegeneratingFailed) return;
+
+    const pollStatus = async () => {
+      try {
+        const status = await audioApi.getTaskStatus(failedTaskId);
+
+        if (status.status === 'completed' || status.status === 'failed' || status.status === 'cancelled') {
+          setIsRegeneratingFailed(false);
+
+          // 获取结果并更新对应的文件
+          const result = await audioApi.getTaskResults(failedTaskId);
+          if (result.files && result.files.length > 0) {
+            setGeneratedFiles((prev) => {
+              const updatedFiles = [...prev];
+              result.files.forEach((newFile) => {
+                const index = updatedFiles.findIndex((f) => f.index === newFile.index);
+                if (index !== -1) {
+                  updatedFiles[index] = newFile;
+                }
+              });
+              return updatedFiles;
+            });
+          }
+
+          setFailedTaskId(null);
+        }
+      } catch (error) {
+        console.error('Failed to get task status:', error);
+      }
+    };
+
+    pollStatus();
+    const interval = setInterval(pollStatus, POLL_INTERVAL);
+
+    return () => clearInterval(interval);
+  }, [failedTaskId, isRegeneratingFailed]);
 
   return (
     <div className="min-h-screen bg-gray-50">
@@ -327,6 +392,8 @@ export const Home: React.FC = () => {
                   rate={rate}
                   onRegenerateComplete={handleRegenerateComplete}
                   onTextUpdate={handleTextUpdate}
+                  onRegenerateFailed={handleRegenerateFailed}
+                  isRegeneratingFailed={isRegeneratingFailed}
                 />
               </section>
             )}
