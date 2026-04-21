@@ -98,6 +98,13 @@ def generate_audio_sync(
     # 执行合成，最多重试2次（共3次尝试）
     max_retries = 2
     for attempt in range(max_retries + 1):
+        # 每次尝试前删除可能存在的部分文件，避免内容堆叠
+        if os.path.exists(file_path):
+            try:
+                os.remove(file_path)
+            except:
+                pass
+
         result = synthesizer.speak_ssml_async(ssml_text).get()
 
         # 检查结果

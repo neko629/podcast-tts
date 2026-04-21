@@ -127,6 +127,13 @@ def generate_audio_from_script(script_file):
         # 最多重试2次（共3次尝试）
         max_retries = 2
         for attempt in range(max_retries + 1):
+            # 每次尝试前删除可能存在的部分文件，避免内容堆叠
+            if os.path.exists(file_path):
+                try:
+                    os.remove(file_path)
+                except:
+                    pass
+
             # 执行合成 (注意这里改为了 speak_ssml_async)
             result = synthesizer.speak_ssml_async(ssml_text).get()
 
