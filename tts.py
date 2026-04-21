@@ -124,20 +124,29 @@ def generate_audio_from_script(script_file):
         print(
             f"正在合成第 {line_number} 句 -> 角色: {speaker_name}, 音色: {voice_name}, 语速: {rate}倍, 音质: 48kHz...")
 
-        # 执行合成 (注意这里改为了 speak_ssml_async)
-        result = synthesizer.speak_ssml_async(ssml_text).get()
+        # 最多重试2次（共3次尝试）
+        max_retries = 2
+        for attempt in range(max_retries + 1):
+            # 执行合成 (注意这里改为了 speak_ssml_async)
+            result = synthesizer.speak_ssml_async(ssml_text).get()
 
-        # 处理结果
-        if result.reason == speechsdk.ResultReason.SynthesizingAudioCompleted:
-            print(f"✅ 成功生成: {file_path}")
-            # 累加生成的音频时长
-            total_duration += result.audio_duration
-        elif result.reason == speechsdk.ResultReason.Canceled:
-            cancellation_details = result.cancellation_details
-            print(f"❌ 合成取消/失败: {cancellation_details.reason}")
-            if cancellation_details.reason == speechsdk.CancellationReason.Error:
-                print(f"错误详情: {cancellation_details.error_details}")
-                print("请检查你的 API 密钥、区域以及网络连接。")
+            # 处理结果
+            if result.reason == speechsdk.ResultReason.SynthesizingAudioCompleted:
+                print(f"✅ 成功生成: {file_path}")
+                # 累加生成的音频时长
+                total_duration += result.audio_duration
+                break
+            elif result.reason == speechsdk.ResultReason.Canceled:
+                cancellation_details = result.cancellation_details
+                if attempt < max_retries:
+                    print(f"⚠️ 第 {line_number} 句合成失败 (尝试 {attempt + 1}/{max_retries + 1})，正在重试...")
+                    time.sleep(1)  # 重试前等待1秒
+                    continue
+                else:
+                    print(f"❌ 合成取消/失败: {cancellation_details.reason}")
+                    if cancellation_details.reason == speechsdk.CancellationReason.Error:
+                        print(f"错误详情: {cancellation_details.error_details}")
+                        print("请检查你的 API 密钥、区域以及网络连接。")
 
         # 稍微加一点延迟，避免触发 API 速率限制
         time.sleep(0.5)

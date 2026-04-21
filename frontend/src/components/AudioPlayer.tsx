@@ -13,6 +13,7 @@ interface AudioPlayerProps {
   onTextUpdate?: (index: number, newText: string) => void;
   onRegenerateFailed?: (failedIndices: number[]) => void;
   isRegeneratingFailed?: boolean;
+  failedTaskStatus?: TaskStatus | null;
 }
 
 const POLL_INTERVAL = 1000;
@@ -354,6 +355,7 @@ export const AudioPlayer: React.FC<AudioPlayerProps> = ({
   onTextUpdate,
   onRegenerateFailed,
   isRegeneratingFailed = false,
+  failedTaskStatus,
 }) => {
   // 自动连续播放开关
   const [autoPlayNext, setAutoPlayNext] = useState(false);
@@ -460,6 +462,26 @@ export const AudioPlayer: React.FC<AudioPlayerProps> = ({
                 <RefreshCw className={`h-3 w-3 ${isRegeneratingFailed ? 'animate-spin' : ''}`} />
                 <span>{isRegeneratingFailed ? '重试中...' : '重试失败项'}</span>
               </button>
+            </div>
+          )}
+
+          {/* 批量重试进度条 */}
+          {isRegeneratingFailed && failedTaskStatus && (
+            <div className="flex-1 max-w-48">
+              <div className="flex items-center gap-2">
+                <div className="flex-1 h-1.5 bg-gray-200 rounded-full overflow-hidden">
+                  <div
+                    className="h-full bg-orange-500 transition-all duration-300"
+                    style={{ width: `${failedTaskStatus.progress}%` }}
+                  />
+                </div>
+                <span className="text-xs text-orange-600 font-medium">
+                  {failedTaskStatus.progress}%
+                </span>
+              </div>
+              {failedTaskStatus.message && (
+                <p className="text-xs text-gray-500 mt-1 truncate">{failedTaskStatus.message}</p>
+              )}
             </div>
           )}
           <span className="text-xs text-gray-500">

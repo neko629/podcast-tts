@@ -36,6 +36,7 @@ export const Home: React.FC = () => {
   // 批量重新生成失败项
   const [isRegeneratingFailed, setIsRegeneratingFailed] = useState(false);
   const [failedTaskId, setFailedTaskId] = useState<string | null>(null);
+  const [failedTaskStatus, setFailedTaskStatus] = useState<TaskStatus | null>(null);
 
   // 加载可用语音
   useEffect(() => {
@@ -240,6 +241,7 @@ export const Home: React.FC = () => {
     const pollStatus = async () => {
       try {
         const status = await audioApi.getTaskStatus(failedTaskId);
+        setFailedTaskStatus(status);
 
         if (status.status === 'completed' || status.status === 'failed' || status.status === 'cancelled') {
           setIsRegeneratingFailed(false);
@@ -260,6 +262,7 @@ export const Home: React.FC = () => {
           }
 
           setFailedTaskId(null);
+          setFailedTaskStatus(null);
         }
       } catch (error) {
         console.error('Failed to get task status:', error);
@@ -394,6 +397,7 @@ export const Home: React.FC = () => {
                   onTextUpdate={handleTextUpdate}
                   onRegenerateFailed={handleRegenerateFailed}
                   isRegeneratingFailed={isRegeneratingFailed}
+                  failedTaskStatus={failedTaskStatus}
                 />
               </section>
             )}

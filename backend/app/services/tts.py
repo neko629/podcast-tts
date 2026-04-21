@@ -95,33 +95,41 @@ def generate_audio_sync(
     </speak>
     """
 
-    # 执行合成
-    result = synthesizer.speak_ssml_async(ssml_text).get()
+    # 执行合成，最多重试2次（共3次尝试）
+    max_retries = 2
+    for attempt in range(max_retries + 1):
+        result = synthesizer.speak_ssml_async(ssml_text).get()
 
-    # 检查结果
-    if result.reason == speechsdk.ResultReason.SynthesizingAudioCompleted:
-        return {
-            "index": line.index,
-            "filename": file_name,
-            "url": f"/output/{file_name}",
-            "speaker": line.speaker,
-            "text": line.text,
-            "success": True
-        }
-    else:
-        error_msg = ""
-        if result.reason == speechsdk.ResultReason.Canceled:
-            cancellation_details = result.cancellation_details
-            error_msg = str(cancellation_details.error_details)
-        return {
-            "index": line.index,
-            "filename": None,
-            "url": None,
-            "speaker": line.speaker,
-            "text": line.text,
-            "success": False,
-            "error": error_msg
-        }
+        # 检查结果
+        if result.reason == speechsdk.ResultReason.SynthesizingAudioCompleted:
+            return {
+                "index": line.index,
+                "filename": file_name,
+                "url": f"/output/{file_name}",
+                "speaker": line.speaker,
+                "text": line.text,
+                "success": True
+            }
+        else:
+            error_msg = ""
+            if result.reason == speechsdk.ResultReason.Canceled:
+                cancellation_details = result.cancellation_details
+                error_msg = str(cancellation_details.error_details)
+
+            # 如果还有重试机会，等待后重试
+            if attempt < max_retries:
+                time.sleep(1)
+                continue
+
+            return {
+                "index": line.index,
+                "filename": None,
+                "url": None,
+                "speaker": line.speaker,
+                "text": line.text,
+                "success": False,
+                "error": error_msg
+            }
 
 
 async def generate_audio(
