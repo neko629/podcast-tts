@@ -70,6 +70,15 @@ def generate_audio_sync(
         region=SPEECH_REGION
     )
 
+    # 设置超时时间（单位：毫秒）
+    # 连接超时：30秒，响应超时：120秒（长文本需要更长时间）
+    speech_config.set_property(
+        speechsdk.PropertyId.SpeechServiceConnection_InitialSilenceTimeoutMs, "30000"
+    )
+    speech_config.set_property(
+        speechsdk.PropertyId.SpeechServiceConnection_ResponseTimeoutMs, "120000"
+    )
+
     # 设置输出格式为48kHz 16bit单声道PCM
     speech_config.set_speech_synthesis_output_format(
         speechsdk.SpeechSynthesisOutputFormat.Riff48Khz16BitMonoPcm
