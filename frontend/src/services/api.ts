@@ -136,4 +136,25 @@ export const audioApi = {
     const { data: result } = await api.post('/audio/merge', data);
     return result;
   },
+
+  // 试听功能
+  // 检查试听音频是否已存在
+  checkPreviewStatus: async (voiceId: string): Promise<{ voice_id: string; exists: boolean; url: string | null }> => {
+    const { data } = await api.get(`/audio/preview-status/${voiceId}`);
+    return data;
+  },
+
+  // 获取试听音频
+  getPreviewAudio: async (voiceId: string): Promise<Blob> => {
+    const { data } = await api.get(`/audio/preview/${voiceId}`, {
+      responseType: 'blob',
+    });
+    return data;
+  },
+
+  // 生成试听音频
+  generatePreview: async (voiceId: string): Promise<{ success: boolean; voice_id: string; url: string; text: string; rate: number }> => {
+    const { data } = await api.post('/audio/preview', { voice_id: voiceId });
+    return data;
+  },
 };
