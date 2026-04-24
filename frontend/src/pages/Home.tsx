@@ -8,6 +8,7 @@ import { AudioPlayer } from '@/components/AudioPlayer';
 import { SubtitleGenerator } from '@/components/SubtitleGenerator';
 import { SubtitleToolbar } from '@/components/SubtitleToolbar';
 import { scriptApi, voiceApi, audioApi } from '@/services/api';
+import { getCharacterDefault } from '@/utils/characterDefaults';
 import type { Line, Voice, TaskStatus, AudioFile } from '@/types';
 
 const POLL_INTERVAL = 1000; // 轮询间隔1秒
@@ -62,11 +63,13 @@ export const Home: React.FC = () => {
       setCharacters(result.characters);
       setSelectedIndices(result.lines.map((l) => l.index));
 
-      // 初始化语音配置（尝试为不同性别分配不同声音）
+      // 初始化语音配置：优先使用已保存的角色默认声音，其次按启发式分配
       const initialConfig: Record<string, string> = {};
       result.characters.forEach((char, idx) => {
-        // 简单启发式：第一个角色用女声，第二个用男声
-        if (idx === 0) {
+        const savedDefault = getCharacterDefault(char);
+        if (savedDefault) {
+          initialConfig[char] = savedDefault;
+        } else if (idx === 0) {
           initialConfig[char] = 'zh-CN-XiaoxiaoNeural';
         } else if (idx === 1) {
           initialConfig[char] = 'zh-CN-YunxiNeural';

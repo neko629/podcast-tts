@@ -1,7 +1,12 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { Mic, Play, Pause, RefreshCw, Volume2 } from 'lucide-react';
+import { Mic, Play, Pause, RefreshCw, Volume2, Star } from 'lucide-react';
 import type { Voice } from '@/types';
 import { audioApi } from '@/services/api';
+import {
+  getCharacterDefault,
+  setCharacterDefault,
+  clearCharacterDefault,
+} from '@/utils/characterDefaults';
 
 interface VoiceConfigProps {
   characters: string[];
@@ -28,6 +33,29 @@ const VoiceItem: React.FC<VoiceItemProps> = ({
   const [previewUrl, setPreviewUrl] = useState<string | null>(null);
   const [previewExists, setPreviewExists] = useState(false);
   const audioRef = useRef<HTMLAudioElement>(null);
+
+  // 该角色已保存的默认声音（用于按钮展示态）
+  const [savedDefault, setSavedDefault] = useState<string | undefined>(
+    () => getCharacterDefault(character)
+  );
+
+  // 角色变化时刷新默认值（例如切换剧本）
+  useEffect(() => {
+    setSavedDefault(getCharacterDefault(character));
+  }, [character]);
+
+  const isCurrentDefault = !!selectedVoiceId && savedDefault === selectedVoiceId;
+
+  const handleToggleDefault = () => {
+    if (!selectedVoiceId) return;
+    if (isCurrentDefault) {
+      clearCharacterDefault(character);
+      setSavedDefault(undefined);
+    } else {
+      setCharacterDefault(character, selectedVoiceId);
+      setSavedDefault(selectedVoiceId);
+    }
+  };
 
   // 获取选中的语音信息
   const selectedVoice = availableVoices.find(v => v.id === selectedVoiceId);
@@ -135,6 +163,22 @@ const VoiceItem: React.FC<VoiceItemProps> = ({
         <p className="text-xs text-orange-500 mb-3">
           未选择，将使用默认声音
         </p>
+      )}
+
+      {/* 设为角色默认声音 */}
+      {selectedVoiceId && (
+        <button
+          onClick={handleToggleDefault}
+          title={isCurrentDefault ? '点击取消默认' : '下次同名角色自动使用此声音'}
+          className={`mb-3 w-full flex items-center justify-center gap-1.5 px-3 py-1.5 text-xs rounded-md border transition-colors ${
+            isCurrentDefault
+              ? 'bg-amber-50 border-amber-300 text-amber-700 hover:bg-amber-100'
+              : 'bg-white border-gray-300 text-gray-600 hover:bg-gray-50'
+          }`}
+        >
+          <Star className={`h-3.5 w-3.5 ${isCurrentDefault ? 'fill-amber-500 text-amber-500' : ''}`} />
+          <span>{isCurrentDefault ? '已设为默认（点击取消）' : '设为角色默认声音'}</span>
+        </button>
       )}
 
       {/* 试听功能 */}
