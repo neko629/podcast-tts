@@ -99,15 +99,6 @@ def generate_audio_sync(
 
     speech_config.speech_synthesis_voice_name = voice_name
 
-    # 配置音频输出
-    audio_config = speechsdk.audio.AudioOutputConfig(filename=file_path)
-
-    # 创建合成器
-    synthesizer = speechsdk.SpeechSynthesizer(
-        speech_config=speech_config,
-        audio_config=audio_config
-    )
-
     # 构建SSML
     ssml_text = f"""
     <speak version="1.0" xmlns="http://www.w3.org/2001/10/synthesis" xml:lang="zh-CN">
@@ -126,6 +117,13 @@ def generate_audio_sync(
                 os.remove(file_path)
             except:
                 pass
+
+        # 每次尝试都重建 audio_config 和 synthesizer，避免 SDK 复用同一文件句柄导致音频追加堆叠
+        audio_config = speechsdk.audio.AudioOutputConfig(filename=file_path)
+        synthesizer = speechsdk.SpeechSynthesizer(
+            speech_config=speech_config,
+            audio_config=audio_config
+        )
 
         result = synthesizer.speak_ssml_async(ssml_text).get()
 

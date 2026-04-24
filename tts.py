@@ -112,11 +112,7 @@ def generate_audio_from_script(script_file):
         # 配置文件输出路径 (格式: 001_角色名.wav)
         file_name = f"{line_number:03d}_{speaker_name}.wav"
         file_path = os.path.join(output_dir, file_name)
-        audio_config = speechsdk.audio.AudioOutputConfig(filename=file_path)
 
-        # 创建语音合成器
-        synthesizer = speechsdk.SpeechSynthesizer(speech_config=speech_config,
-                                                  audio_config=audio_config)
         rate = 0.6
         # 使用 SSML 构建带语速控制的文本，rate="0.7" 代表 0.7 倍速
         ssml_text = f"""
@@ -139,6 +135,11 @@ def generate_audio_from_script(script_file):
                     os.remove(file_path)
                 except:
                     pass
+
+            # 每次尝试都重建 audio_config 和 synthesizer，避免 SDK 复用同一文件句柄导致音频追加堆叠
+            audio_config = speechsdk.audio.AudioOutputConfig(filename=file_path)
+            synthesizer = speechsdk.SpeechSynthesizer(speech_config=speech_config,
+                                                      audio_config=audio_config)
 
             # 执行合成 (注意这里改为了 speak_ssml_async)
             result = synthesizer.speak_ssml_async(ssml_text).get()
