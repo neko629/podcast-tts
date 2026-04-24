@@ -124,8 +124,10 @@ export const Home: React.FC = () => {
   const handleGenerate = useCallback(async () => {
     if (selectedIndices.length === 0) return;
 
-    setIsGenerating(true);
+    setTaskId(null);
+    setTaskStatus(null);
     setGeneratedFiles([]);
+    setIsGenerating(true);
 
     try {
       const { task_id } = await audioApi.generate({
