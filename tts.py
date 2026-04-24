@@ -97,12 +97,9 @@ def generate_audio_from_script(script_file):
                                                region=SPEECH_REGION)
 
         # 设置超时时间（单位：毫秒）
-        # 连接超时：30秒，响应超时：120秒（长文本需要更长时间）
+        # 连接超时：30秒
         speech_config.set_property(
             speechsdk.PropertyId.SpeechServiceConnection_InitialSilenceTimeoutMs, "30000"
-        )
-        speech_config.set_property(
-            speechsdk.PropertyId.SpeechServiceConnection_ResponseTimeoutMs, "120000"
         )
 
         # --- 设置输出音频格式为 48kHz 16bit 单声道 PCM ---

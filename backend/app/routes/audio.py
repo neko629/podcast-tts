@@ -19,6 +19,11 @@ results_store: Dict[str, List[dict]] = {}
 task_cancel_flags: Dict[str, bool] = {}
 
 OUTPUT_DIR = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(__file__))), "output")
+PREVIEW_DIR = os.path.join(OUTPUT_DIR, "preview")
+
+# 试听文本和语速
+PREVIEW_TEXT = "大家好，欢迎来到今天的《大白话中文》！"
+PREVIEW_RATE = 0.8
 
 
 @router.post("/generate")
@@ -385,3 +390,106 @@ async def merge_audio(request: MergeAudioRequest):
         raise
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"合并音频失败: {str(e)}")
+
+
+# ============== 试听功能 ==============
+
+class PreviewRequest(BaseModel):
+    voice_id: str
+
+
+@router.get("/preview/{voice_id}")
+async def get_preview_audio(voice_id: str):
+    """
+    获取试听音频文件
+    如果存在则直接返回，不存在则返回404
+    """
+    os.makedirs(PREVIEW_DIR, exist_ok=True)
+
+    # 文件名中的冒号替换为下划线（某些voice_id包含冒号）
+    safe_voice_id = voice_id.replace(":", "_")
+    preview_filename = f"preview_{safe_voice_id}.wav"
+    preview_path = os.path.join(PREVIEW_DIR, preview_filename)
+
+    if not os.path.exists(preview_path):
+        raise HTTPException(status_code=404, detail="试听音频不存在，请先生成")
+
+    return FileResponse(
+        preview_path,
+        media_type="audio/wav",
+        filename=preview_filename
+    )
+
+
+@router.post("/preview")
+async def generate_preview_audio(request: PreviewRequest):
+    """
+    生成试听音频
+    试听内容："大家好，欢迎来到今天的《大白话中文》！"
+    语速：0.8
+    """
+    from ..services.tts import generate_audio
+
+    os.makedirs(PREVIEW_DIR, exist_ok=True)
+
+    # 文件名中的冒号替换为下划线
+    safe_voice_id = request.voice_id.replace(":", "_")
+    preview_filename = f"preview_{safe_voice_id}.wav"
+    preview_path = os.path.join(PREVIEW_DIR, preview_filename)
+
+    # 删除已存在的文件（强制重新生成）
+    if os.path.exists(preview_path):
+        os.remove(preview_path)
+
+    # 创建临时 Line 对象用于生成
+    preview_line = Line(
+        index=0,
+        speaker="试听",
+        text=PREVIEW_TEXT
+    )
+
+    try:
+        result = await generate_audio(preview_line, request.voice_id, PREVIEW_RATE, PREVIEW_DIR)
+
+        if result.get("success"):
+            # 重命名生成的文件为标准预览文件名
+            generated_file = os.path.join(PREVIEW_DIR, result["filename"])
+            if os.path.exists(generated_file) and generated_file != preview_path:
+                os.rename(generated_file, preview_path)
+
+            return {
+                "success": True,
+                "voice_id": request.voice_id,
+                "url": f"/output/preview/{preview_filename}",
+                "text": PREVIEW_TEXT,
+                "rate": PREVIEW_RATE
+            }
+        else:
+            raise HTTPException(
+                status_code=500,
+                detail=f"生成试听音频失败: {result.get('error', '未知错误')}"
+            )
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"生成试听音频失败: {str(e)}")
+
+
+@router.get("/preview-status/{voice_id}")
+async def check_preview_status(voice_id: str):
+    """
+    检查试听音频是否已存在
+    """
+    os.makedirs(PREVIEW_DIR, exist_ok=True)
+
+    safe_voice_id = voice_id.replace(":", "_")
+    preview_filename = f"preview_{safe_voice_id}.wav"
+    preview_path = os.path.join(PREVIEW_DIR, preview_filename)
+
+    exists = os.path.exists(preview_path)
+
+    return {
+        "voice_id": voice_id,
+        "exists": exists,
+        "url": f"/output/preview/{preview_filename}" if exists else None
+    }
