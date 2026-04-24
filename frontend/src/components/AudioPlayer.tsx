@@ -271,7 +271,12 @@ const AudioItem = forwardRef<HTMLAudioElement, AudioItemProps>(
             <audio
               ref={audioRef}
               src={file.url}
-              onEnded={onEnded}
+              onEnded={() => {
+                if (audioRef.current) {
+                  audioRef.current.currentTime = 0;
+                }
+                onEnded();
+              }}
               className="hidden"
             />
           )}
@@ -361,6 +366,50 @@ export const AudioPlayer: React.FC<AudioPlayerProps> = ({
   const [autoPlayNext, setAutoPlayNext] = useState(false);
   // 当前正在播放的文件索引
   const [playingIndex, setPlayingIndex] = useState<number | null>(null);
+
+  // 列表容器和条目的引用，用于播放时自动滚动到当前条目
+  const listRef = useRef<HTMLDivElement>(null);
+  const itemRefs = useRef<Record<number, HTMLDivElement | null>>({});
+
+  // 音频元素引用和上一次的播放索引，用于切换条目时把旧条目归零
+  const audioRefs = useRef<Record<number, HTMLAudioElement | null>>({});
+  const prevPlayingIndexRef = useRef<number | null>(null);
+
+  // 从一个条目切到另一个条目时，把旧条目的播放位置归零（保留暂停/恢复的位置）
+  useEffect(() => {
+    const prev = prevPlayingIndexRef.current;
+    if (prev !== null && playingIndex !== null && prev !== playingIndex) {
+      const prevAudio = audioRefs.current[prev];
+      if (prevAudio) {
+        prevAudio.currentTime = 0;
+      }
+    }
+    prevPlayingIndexRef.current = playingIndex;
+  }, [playingIndex]);
+
+  // 播放的条目超出可视区时，把容器滚动到让它露出来（只滚容器，不滚页面）
+  useEffect(() => {
+    if (playingIndex === null) return;
+    const container = listRef.current;
+    const item = itemRefs.current[playingIndex];
+    if (!container || !item) return;
+
+    const containerRect = container.getBoundingClientRect();
+    const itemRect = item.getBoundingClientRect();
+
+    const itemTopInContainer = itemRect.top - containerRect.top + container.scrollTop;
+    const itemBottomInContainer = itemTopInContainer + itemRect.height;
+    const viewTop = container.scrollTop;
+    const viewBottom = viewTop + container.clientHeight;
+
+    if (itemTopInContainer < viewTop || itemBottomInContainer > viewBottom) {
+      const targetTop = itemTopInContainer - (container.clientHeight - itemRect.height) / 2;
+      container.scrollTo({
+        top: Math.max(0, targetTop),
+        behavior: 'smooth',
+      });
+    }
+  }, [playingIndex]);
 
   // 获取成功生成的文件索引列表（用于连续播放）
   const successFiles = files.filter(f => f.success);
@@ -490,21 +539,30 @@ export const AudioPlayer: React.FC<AudioPlayerProps> = ({
         </div>
       </div>
 
-      <div className="space-y-2 max-h-80 overflow-y-auto">
+      <div ref={listRef} className="space-y-2 max-h-80 overflow-y-auto">
         {files.map((file) => (
-          <AudioItem
+          <div
             key={file.index}
-            file={file}
-            lines={lines}
-            voiceConfig={voiceConfig}
-            rate={rate}
-            onRegenerateComplete={onRegenerateComplete}
-            onTextUpdate={onTextUpdate}
-            isPlaying={playingIndex === file.index}
-            onPlay={() => handlePlay(file.index)}
-            onPause={handlePause}
-            onEnded={() => handleEnded(file.index)}
-          />
+            ref={(el) => {
+              itemRefs.current[file.index] = el;
+            }}
+          >
+            <AudioItem
+              ref={(el) => {
+                audioRefs.current[file.index] = el;
+              }}
+              file={file}
+              lines={lines}
+              voiceConfig={voiceConfig}
+              rate={rate}
+              onRegenerateComplete={onRegenerateComplete}
+              onTextUpdate={onTextUpdate}
+              isPlaying={playingIndex === file.index}
+              onPlay={() => handlePlay(file.index)}
+              onPause={handlePause}
+              onEnded={() => handleEnded(file.index)}
+            />
+          </div>
         ))}
       </div>
     </div>
