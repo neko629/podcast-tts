@@ -24,9 +24,25 @@ AVAILABLE_VOICES = [
     Voice(id="zh-CN-YunfengNeural", name="云枫", gender="Male", locale="zh-CN"),
     Voice(id="zh-CN-YunhaoNeural", name="云皓", gender="Male", locale="zh-CN"),
     Voice(id="zh-CN-YunyeNeural", name="云野", gender="Male", locale="zh-CN"),
-    # HD高质量语音 (用户已验证)
-    Voice(id="zh-CN-Xiaoxiao2:DragonHDFlashLatestNeural", name="晓晓HD", gender="Female", locale="zh-CN"),
+    # Dragon HD Flash — 女声
+    Voice(id="zh-CN-Xiaoxiao:DragonHDFlashLatestNeural", name="晓晓HD", gender="Female", locale="zh-CN"),
+    Voice(id="zh-CN-Xiaoxiao2:DragonHDFlashLatestNeural", name="晓晓HD 多情感", gender="Female", locale="zh-CN"),
+    Voice(id="zh-CN-Xiaochen:DragonHDFlashLatestNeural", name="晓晨HD", gender="Female", locale="zh-CN"),
+    Voice(id="zh-CN-Xiaoyi:DragonHDFlashLatestNeural", name="晓伊HD", gender="Female", locale="zh-CN"),
+    Voice(id="zh-CN-Xiaoyu:DragonHDFlashLatestNeural", name="晓雨HD", gender="Female", locale="zh-CN"),
+    Voice(id="zh-CN-Xiaohan:DragonHDFlashLatestNeural", name="晓涵HD", gender="Female", locale="zh-CN"),
+    Voice(id="zh-CN-Xiaoshuang:DragonHDFlashLatestNeural", name="晓双HD（童声）", gender="Female", locale="zh-CN"),
+    Voice(id="zh-CN-Xiaoyou:DragonHDFlashLatestNeural", name="晓悠HD（童声）", gender="Female", locale="zh-CN"),
+    # Dragon HD Flash — 男声
     Voice(id="zh-CN-Yunyi:DragonHDFlashLatestNeural", name="云逸HD", gender="Male", locale="zh-CN"),
+    Voice(id="zh-CN-Yunxi:DragonHDFlashLatestNeural", name="云希HD", gender="Male", locale="zh-CN"),
+    Voice(id="zh-CN-Yunxiao:DragonHDFlashLatestNeural", name="云霄HD", gender="Male", locale="zh-CN"),
+    Voice(id="zh-CN-Yunhan:DragonHDFlashLatestNeural", name="云翰HD", gender="Male", locale="zh-CN"),
+    Voice(id="zh-CN-Yunxia:DragonHDFlashLatestNeural", name="云夏HD（童声）", gender="Male", locale="zh-CN"),
+    Voice(id="zh-CN-Yunye:DragonHDFlashLatestNeural", name="云野HD", gender="Male", locale="zh-CN"),
+    # Dragon HD Latest（非 Flash，更高质量、延迟略高）
+    Voice(id="zh-CN-Xiaochen:DragonHDLatestNeural", name="晓晨HD Pro", gender="Female", locale="zh-CN"),
+    Voice(id="zh-CN-Yunfan:DragonHDLatestNeural", name="云帆HD Pro", gender="Male", locale="zh-CN"),
 ]
 
 
